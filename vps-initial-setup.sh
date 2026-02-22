@@ -379,11 +379,21 @@ flush ruleset
 table $NFT_FAMILY filter {
 
     # SSH rate limiting: запоминает IP, автоочистка через 60 секунд
-    set sshbrute {
+    set sshbrute4 {
         type ipv4_addr
         flags dynamic, timeout
         timeout 60s
     }
+
+$(if [[ "$NFT_FAMILY" == "inet" ]]; then
+cat << 'SETV6'
+    set sshbrute6 {
+        type ipv6_addr
+        flags dynamic, timeout
+        timeout 60s
+    }
+SETV6
+fi)
 
     chain input {
         type filter hook input priority 0; policy drop;
@@ -406,8 +416,12 @@ echo "        ip6 nexthdr ipv6-icmp accept"
 fi)
 
         # SSH (порт $SSH_PORT) с rate limiting — не более 4 новых/мин с одного IP
-        tcp dport $SSH_PORT ct state new add @sshbrute { ip saddr limit rate over 4/minute } \\
+        tcp dport $SSH_PORT ct state new ip saddr != 127.0.0.0/8 add @sshbrute4 { ip saddr limit rate over 4/minute } \\
             log prefix "nft-ssh-brute: " level warn drop
+$(if [[ "$NFT_FAMILY" == "inet" ]]; then
+echo "        tcp dport $SSH_PORT ct state new ip6 saddr != ::1 add @sshbrute6 { ip6 saddr limit rate over 4/minute } \\"
+echo "            log prefix \"nft-ssh-brute6: \" level warn drop"
+fi)
         tcp dport $SSH_PORT accept
 
 $(if [[ "$INSTALL_ENDLESSH" == "y" ]]; then
