@@ -770,7 +770,7 @@ while IFS= read -r line; do
     }' | head -1)
     service=${service:-"(nothing listening)"}
     echo -e "  ${GREEN}✔${NC} port ${CYAN}$port${NC} — $service"
-done < <(nft -a list chain inet filter input 2>/dev/null | grep -E 'dport.*accept$')
+done < <(nft -a list chain inet filter input 2>/dev/null | grep -E 'dport.*accept')
 echo ""
 
 echo -e "  ${BOLD}Log:${NC} $LOG_FILE"
