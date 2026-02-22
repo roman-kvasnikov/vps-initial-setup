@@ -761,6 +761,21 @@ echo -e "  ${CYAN}tcp dport 443 accept${NC}"
 echo -e "  Затем: ${CYAN}sudo nft -f /etc/nftables.conf${NC}"
 echo ""
 
+# --- Открытые порты через firewall ---
+echo -e "  ${BOLD}Порты, открытые в firewall (доступны снаружи):${NC}"
+# Парсим accept-правила из chain input, исключая loopback, established и icmp
+while IFS= read -r line; do
+    port=$(echo "$line" | grep -oP 'dport \K[0-9]+')
+    [[ -z "$port" ]] && continue
+    # Определяем что слушает на этом порту
+    service=$(ss -tlnp "sport = :$port" 2>/dev/null | awk 'NR>1 {
+        match($0, /users:\(\("([^"]+)"/, a); if (a[1]) print a[1]
+    }' | head -1)
+    service=${service:-"(ничего не слушает)"}
+    echo -e "  ${GREEN}✔${NC} порт ${CYAN}$port${NC} — $service"
+done < <(nft -a list chain inet filter input 2>/dev/null | grep -E 'dport.*accept$')
+echo ""
+
 echo -e "  ${BOLD}Лог:${NC} $LOG_FILE"
 echo ""
 
