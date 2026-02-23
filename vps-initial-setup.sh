@@ -301,16 +301,7 @@ Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.
 MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com
 HostKeyAlgorithms ssh-ed25519,ssh-ed25519-cert-v01@openssh.com
 
-Banner /etc/issue.net
 LogLevel VERBOSE
-EOF
-
-cat > /etc/issue.net << 'EOF'
-*******************************************************************
-  WARNING: Unauthorized access to this system is prohibited.
-  All connections are monitored and recorded.
-  Disconnect IMMEDIATELY if you are not an authorized user.
-*******************************************************************
 EOF
 
 if sshd -t 2>/dev/null; then
