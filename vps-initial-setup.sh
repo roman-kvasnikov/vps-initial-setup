@@ -318,6 +318,10 @@ fi
 # ═══════════════════════════════════════════════════════════════
 header "STEP 8: Firewall (nftables)"
 
+# Disabling iptables
+systemctl stop iptables
+systemctl disable iptables
+
 # Backup
 if [[ -f /etc/nftables.conf ]]; then
     cp /etc/nftables.conf "/etc/nftables.conf.backup.$(date +%Y%m%d-%H%M%S)"
