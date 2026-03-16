@@ -745,7 +745,6 @@ echo -e "  ├─ ✔ Automatic security updates"
 echo -e "  ├─ ✔ Sysctl + kernel hardening (anti-spoofing, SYN flood, kptr, BPF, perf)"
 echo -e "  ├─ ✔ Core dumps disabled, /dev/shm hardened"
 echo -e "  ├─ ✔ Cron and su restricted, config files protected"
-echo -e "  ├─ ✔ Legal warning banner on login"
 echo -e "  └─ ✔ Endlessh: ${GREEN}$([ "$INSTALL_ENDLESSH" == "y" ] && echo "tarpit on port 22" || echo "skipped")${NC}"
 echo ""
 
