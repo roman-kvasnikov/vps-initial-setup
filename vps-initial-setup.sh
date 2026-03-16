@@ -569,6 +569,10 @@ if ! grep -q "hard core 0" /etc/security/limits.conf 2>/dev/null; then
 fi
 success "Core dumps disabled"
 
+info "Setting default UMASK in login.defs..."
+sed -i 's/^UMASK\s.*/UMASK 077/' /etc/login.defs
+success "Default UMASK set to 077 in /etc/login.defs"
+
 info "Hardening shared memory (/dev/shm)..."
 if ! grep -q "/dev/shm" /etc/fstab 2>/dev/null; then
     echo "tmpfs /dev/shm tmpfs defaults,noexec,nosuid,nodev 0 0" >> /etc/fstab
