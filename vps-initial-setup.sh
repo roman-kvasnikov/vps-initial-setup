@@ -345,13 +345,13 @@ table inet filter {
     set sshbrute4 {
         type ipv4_addr
         flags dynamic, timeout
-        timeout 60s
+        timeout 300s
     }
 
     set sshbrute6 {
         type ipv6_addr
         flags dynamic, timeout
-        timeout 60s
+        timeout 300s
     }
 
     chain input {
