@@ -677,6 +677,14 @@ fi
 # ═══════════════════════════════════════════════════════════════
 header "STEP 13: Applying SSH settings"
 
+info "Verifying SSH configuration before restart..."
+if ! sshd -t 2>&1; then
+    error "SSH configuration is invalid! Aborting restart."
+    error "Fix the config and restart manually: systemctl restart ssh"
+    exit 1
+fi
+success "SSH configuration is valid"
+
 warn "WARNING: SSH will be restarted with new settings!"
 warn "Your current session will remain active."
 warn "Make sure to test the connection in a NEW terminal before closing this session!"
