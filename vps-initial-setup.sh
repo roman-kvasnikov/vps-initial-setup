@@ -511,6 +511,9 @@ net.ipv4.conf.default.accept_redirects = 0
 net.ipv4.conf.all.send_redirects = 0
 net.ipv4.conf.default.send_redirects = 0
 
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
+
 # IP forwarding
 net.ipv4.ip_forward = $([ "$ENABLE_IP_FORWARD" == "y" ] && echo 1 || echo 0)
 
@@ -530,6 +533,9 @@ net.ipv4.conf.default.log_martians = 1
 # Disable source routing
 net.ipv4.conf.all.accept_source_route = 0
 net.ipv4.conf.default.accept_source_route = 0
+
+net.ipv6.conf.all.accept_source_route = 0
+net.ipv6.conf.default.accept_source_route = 0
 
 # Disable core dumps
 fs.suid_dumpable = 0
