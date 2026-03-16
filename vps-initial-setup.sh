@@ -592,7 +592,7 @@ Defaults requiretty
 Defaults passwd_tries=3
 EOF
 chmod 440 /etc/sudoers.d/99-hardening
-if visudo -c -f /etc/sudoers.d/99-hardening &>/dev/null; then
+if visudo -c &>/dev/null; then
     success "Sudo hardened (timeout=5min, requiretty, 3 attempts)"
 else
     error "Invalid sudoers config, removing..."
