@@ -222,6 +222,10 @@ if ! grep -q 'umask 0077' "$USER_HOME/.bashrc" 2>/dev/null; then
     success "UMASK 0077 set for $NEW_USER"
 fi
 
+info "Locking root account password..."
+passwd -l root
+success "Root account locked (login via su/ssh disabled, sudo still works)"
+
 # ═══════════════════════════════════════════════════════════════
 # STEP 6: SSH keys
 # ═══════════════════════════════════════════════════════════════
