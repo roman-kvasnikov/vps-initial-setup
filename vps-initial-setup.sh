@@ -151,6 +151,7 @@ header "STEP 2: System update"
 
 info "Updating package lists and installing upgrades..."
 export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
 apt update -y
 apt full-upgrade -y
 success "System updated"
