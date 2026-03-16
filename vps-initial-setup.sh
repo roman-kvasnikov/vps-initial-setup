@@ -319,8 +319,8 @@ fi
 header "STEP 8: Firewall (nftables)"
 
 # Disabling iptables
-systemctl stop iptables
-systemctl disable iptables
+systemctl stop iptables 2>/dev/null || true
+systemctl disable iptables 2>/dev/null || true
 
 # Backup
 if [[ -f /etc/nftables.conf ]]; then
