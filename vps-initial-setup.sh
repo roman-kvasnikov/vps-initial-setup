@@ -649,7 +649,7 @@ EOF
     cat > /etc/endlessh/config << 'EOF'
 Port 22
 Delay 10000
-MaxClients 4096
+MaxClients 100
 MaxLineLength 32
 MaxStartTime 0
 BindFamily 0
