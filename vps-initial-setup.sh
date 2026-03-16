@@ -650,7 +650,7 @@ EOF
         apt install -y build-essential git libc6-dev
         (
             cd /tmp
-            git clone --depth 1 --branch 1.1 https://github.com/skeeto/endlessh.git
+            git clone --depth 1 https://github.com/skeeto/endlessh.git
             cd endlessh
             make
             cp endlessh /usr/local/bin/
