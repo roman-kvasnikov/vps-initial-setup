@@ -346,7 +346,7 @@ flush ruleset
 
 table inet filter {
 
-    # SSH rate limiting: remembers IPs, auto-cleanup after 60 seconds
+    # SSH rate limiting: remembers IPs, auto-cleanup after 300 seconds
     set sshbrute4 {
         type ipv4_addr
         flags dynamic, timeout
