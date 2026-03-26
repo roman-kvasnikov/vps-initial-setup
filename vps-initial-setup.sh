@@ -323,9 +323,15 @@ fi
 # ═══════════════════════════════════════════════════════════════
 header "STEP 8: Firewall (nftables)"
 
-# Disabling iptables
-systemctl stop iptables 2>/dev/null || true
-systemctl disable iptables 2>/dev/null || true
+# Switch iptables to nftables backend (needed for Docker compatibility)
+apt install -y iptables 2>/dev/null || true
+if command -v update-alternatives &>/dev/null; then
+    update-alternatives --set iptables /usr/sbin/iptables-nft 2>/dev/null || true
+    update-alternatives --set ip6tables /usr/sbin/ip6tables-nft 2>/dev/null || true
+    success "iptables switched to nft backend (Docker compatible)"
+else
+    warn "update-alternatives not found, skipping iptables-nft switch"
+fi
 
 # Backup
 if [[ -f /etc/nftables.conf ]]; then
