@@ -187,7 +187,7 @@ header "STEP 4: Basic system settings"
 
 if [[ -n "$NEW_HOSTNAME" ]]; then
     hostnamectl set-hostname "$NEW_HOSTNAME"
-    if ! grep -q "$NEW_HOSTNAME" /etc/hosts; then
+    if ! grep -qw "$NEW_HOSTNAME" /etc/hosts; then
         sed -i "0,/^127\.0\.0\.1/s|^127\.0\.0\.1.*|127.0.0.1 localhost $NEW_HOSTNAME|" /etc/hosts
     fi
     success "Hostname set: $NEW_HOSTNAME"
