@@ -26,7 +26,7 @@ error()   { echo -e "${RED}[✘]${NC} $1"; }
 header()  { echo -e "\n${CYAN}${BOLD}═══ $1 ═══${NC}\n"; }
 
 # ─── Log file ──────────────────────────────────────────────
-LOG_FILE="/var/log/vps-setup-$(date +%Y%m%d-%H%M%S).log"
+LOG_FILE="/var/log/vps-initial-setup-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 # ─── Pre-flight checks ────────────────────────────────────
