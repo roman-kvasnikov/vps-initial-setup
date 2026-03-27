@@ -309,6 +309,8 @@ HostKeyAlgorithms ssh-ed25519,ssh-ed25519-cert-v01@openssh.com
 LogLevel VERBOSE
 EOF
 
+chmod 600 /etc/ssh/sshd_config.d/00-hardening.conf
+
 if sshd -t 2>/dev/null; then
     success "SSH configuration is valid"
 else
@@ -615,12 +617,6 @@ else
     error "Invalid sudoers config, removing..."
     rm -f /etc/sudoers.d/99-hardening
 fi
-
-info "Protecting configuration files..."
-chmod 600 /etc/ssh/sshd_config
-chmod 600 /etc/ssh/sshd_config.d/00-hardening.conf 2>/dev/null
-chmod 640 /var/log/auth.log 2>/dev/null
-success "Config file permissions tightened"
 
 info "Disabling unnecessary services..."
 DISABLE_SERVICES=(avahi-daemon cups bluetooth)
