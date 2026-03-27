@@ -410,7 +410,11 @@ fi)
     }
 
     chain forward {
-        type filter hook forward priority 0; policy drop;
+        type filter hook forward priority 10; policy drop;
+
+        # Let Docker/iptables-nft handle its own traffic first (priority 0)
+        # Everything else is dropped
+        ct state established,related accept
     }
 
     chain output {
