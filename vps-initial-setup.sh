@@ -163,6 +163,7 @@ header "STEP 3: Installing packages"
 
 PACKAGES=(
     fail2ban           # Brute-force protection
+    iptables
     nftables           # Firewall (iptables replacement)
     unattended-upgrades # Automatic security updates
     curl               # HTTP client
@@ -326,7 +327,6 @@ fi
 header "STEP 8: Firewall (nftables)"
 
 # Switch iptables to nftables backend (needed for Docker compatibility)
-apt install -y iptables 2>/dev/null || true
 if command -v update-alternatives &>/dev/null; then
     update-alternatives --set iptables /usr/sbin/iptables-nft 2>/dev/null || true
     update-alternatives --set ip6tables /usr/sbin/ip6tables-nft 2>/dev/null || true
