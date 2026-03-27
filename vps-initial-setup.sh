@@ -124,9 +124,11 @@ read -rp "Allow automatic reboot? (y/n, default n): " AUTO_REBOOT
 AUTO_REBOOT=${AUTO_REBOOT:-n}
 
 # --- Hostname ---
+echo ""
 read -rp "Set server hostname? (leave empty to skip): " NEW_HOSTNAME
 
 # --- Timezone ---
+echo ""
 read -rp "Timezone (e.g. Europe/London, empty = UTC): " TIMEZONE
 TIMEZONE=${TIMEZONE:-UTC}
 
