@@ -72,6 +72,7 @@ while true; do
 done
 
 # --- SSH port ---
+echo ""
 while true; do
     read -rp "Enter new SSH port (1025-65535, recommended 10000-65535): " SSH_PORT
     if [[ ! "$SSH_PORT" =~ ^[0-9]+$ ]]; then
