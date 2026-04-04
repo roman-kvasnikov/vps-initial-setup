@@ -301,7 +301,7 @@ ClientAliveCountMax 2
 
 X11Forwarding no
 MaxAuthTries 3
-MaxStartups 3:50:10
+MaxStartups 10:30:60
 
 UsePAM yes
 
