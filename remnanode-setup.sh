@@ -1,18 +1,60 @@
 #!/bin/bash
 set -euo pipefail
 
-# ─── Pre-flight checks ────────────────────────────────────
+# ============================================================
+#  Ubuntu VPS Initial Setup — Remnanode Deployment
+#  Docker · Geo databases · Kernel tuning
+# ============================================================
+
+# ── Colors & helpers ───────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+step_current=0
+step_total=4
+
+info()  { echo -e "${CYAN}[INFO]${NC}  $1"; }
+ok()    { echo -e "${GREEN}[OK]${NC}    $1"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC}  $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+step() {
+    step_current=$((step_current + 1))
+    echo ""
+    echo -e "${BOLD}${CYAN}═══ [${step_current}/${step_total}] $1 ═══${NC}"
+}
+
+# ── Pre-flight checks ─────────────────────────────────────
 if [[ $EUID -ne 0 ]]; then
     error "This script must be run as root (sudo bash $0)"
     exit 1
 fi
 
-echo "=== [1/8] Установка Docker ==="
-curl -fsSL https://get.docker.com | sh
-echo "Docker установлен: $(docker --version)"
+echo ""
+echo -e "${BOLD}${GREEN}╔════════════════════════════════════════════╗${NC}"
+echo -e "${BOLD}${GREEN}║     Remnanode VPS Setup — Starting...      ║${NC}"
+echo -e "${BOLD}${GREEN}╚════════════════════════════════════════════╝${NC}"
 
-echo "=== [2/8] Подготовка Remnanode ==="
+# ── Step 1: Docker ─────────────────────────────────────────
+step "Installing Docker"
+
+if command -v docker &>/dev/null; then
+    warn "Docker is already installed: $(docker --version)"
+else
+    curl -fsSL https://get.docker.com | sh
+    ok "Docker installed: $(docker --version)"
+fi
+
+# ── Step 2: Remnanode directory & compose ──────────────────
+step "Setting up Remnanode"
+
 mkdir -p /opt/remnanode
+info "Created /opt/remnanode"
+
 cat > /opt/remnanode/docker-compose.yml << 'EOF'
 services:
   remnanode:
@@ -40,7 +82,11 @@ services:
       # - ./certs/key.key:/etc/xray/certs/key.key:ro
 EOF
 
-echo "=== [3/8] Скрипт обновления геобаз + cron ==="
+ok "docker-compose.yml created"
+
+# ── Step 3: Geo database update script & cron ──────────────
+step "Configuring geo database updates"
+
 cat > /opt/remnanode/update-geo.sh << 'SCRIPT'
 #!/bin/bash
 
@@ -49,7 +95,7 @@ LOG_FILE="/var/log/xray-geo-update.log"
 
 echo "$(date): Starting geo update" >> "$LOG_FILE"
 
-# Скачиваем все файлы во временные
+# Download all files to temporary names first
 if wget -q -O "$GEO_DIR/geoip.dat.new" \
      https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat && \
    wget -q -O "$GEO_DIR/geosite.dat.new" \
@@ -59,7 +105,7 @@ if wget -q -O "$GEO_DIR/geoip.dat.new" \
    wget -q -O "$GEO_DIR/ru-geosite.dat.new" \
      https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat; then
 
-  # Все скачалось — делаем атомарную замену
+  # All downloaded — atomic swap
   mv "$GEO_DIR/geoip.dat.new" "$GEO_DIR/geoip.dat"
   mv "$GEO_DIR/geosite.dat.new" "$GEO_DIR/geosite.dat"
   mv "$GEO_DIR/ru-geoip.dat.new" "$GEO_DIR/ru-geoip.dat"
@@ -68,26 +114,29 @@ if wget -q -O "$GEO_DIR/geoip.dat.new" \
   docker restart remnanode
   echo "$(date): Update successful, container restarted" >> "$LOG_FILE"
 else
-  # Что-то не скачалось — чистим временные файлы
+  # Download failed — clean up temp files
   rm -f "$GEO_DIR"/*.new
   echo "$(date): Download failed, no changes made" >> "$LOG_FILE"
 fi
 SCRIPT
 
 chmod +x /opt/remnanode/update-geo.sh
+ok "update-geo.sh created"
 
-# Добавляем в cron (каждый день в 4:00)
+# Add to cron (daily at 04:00)
 CRON_JOB="0 4 * * * /opt/remnanode/update-geo.sh"
 (crontab -l 2>/dev/null | grep -v "update-geo.sh"; echo "$CRON_JOB") | crontab -
+ok "Cron job added (daily at 04:00)"
 
-# Первый запуск геобаз
-echo "Скачиваю геобазы (первый запуск)..."
+# First run
+info "Downloading geo databases (initial run)..."
 /opt/remnanode/update-geo.sh
+ok "Geo databases downloaded"
 
-# ═══════════════════════════════════════════════════════════════
-# STEP 11: Additional Kernel Parameters
-# ═══════════════════════════════════════════════════════════════
-cat > /etc/sysctl.d/99-optimal-vless.conf << EOF
+# ── Step 4: Kernel tuning ─────────────────────────────────
+step "Applying kernel parameters"
+
+cat > /etc/sysctl.d/99-optimal-vless.conf << 'EOF'
 # ===== OPTIMAL VLESS SERVER CONFIG =====
 
 fs.file-max=2097152
@@ -148,14 +197,17 @@ vm.max_map_count = 262144
 EOF
 
 sysctl --system > /dev/null 2>&1
+ok "Kernel parameters applied"
 
+# ── Summary ────────────────────────────────────────────────
 echo ""
-echo "============================================"
-echo "  Remnanode Готова!"
-echo "============================================"
+echo -e "${BOLD}${GREEN}╔════════════════════════════════════════════╗${NC}"
+echo -e "${BOLD}${GREEN}║           Setup complete!                   ║${NC}"
+echo -e "${BOLD}${GREEN}╚════════════════════════════════════════════╝${NC}"
 echo ""
-echo "  Remnanode:      cd /opt/remnanode"
-echo "  Редактировать:  nano /opt/remnanode/docker-compose.yml"
-echo "  Запуск:         docker compose -f /opt/remnanode/docker-compose.yml up -d"
+echo -e "  ${BOLD}Remnanode:${NC}      cd /opt/remnanode"
+echo -e "  ${BOLD}Edit config:${NC}    nano /opt/remnanode/docker-compose.yml"
+echo -e "  ${BOLD}Start:${NC}          docker compose up -d"
 echo ""
-echo "============================================"
+echo -e "  ${YELLOW}Don't forget to set SECRET_KEY in docker-compose.yml${NC}"
+echo ""
