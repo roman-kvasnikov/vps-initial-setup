@@ -1,10 +1,13 @@
-#!/bin/bash
-set -euo pipefail
+#!/usr/bin/env bash
+#
+# ╔══════════════════════════════════════════════════════════╗
+# ║     Ubuntu VPS Initial Setup — Remnanode Deployment      ║
+# ║                                                          ║
+# ║         Docker · Geo databases · Kernel tuning           ║
+# ╚══════════════════════════════════════════════════════════╝
+#
 
-# ============================================================
-#  Ubuntu VPS Initial Setup — Remnanode Deployment
-#  Docker · Geo databases · Kernel tuning
-# ============================================================
+set -euo pipefail
 
 # ── Colors & helpers ───────────────────────────────────────
 RED='\033[0;31m'
