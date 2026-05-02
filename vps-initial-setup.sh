@@ -346,6 +346,8 @@ fi
 
 info "Generating /etc/nftables.conf ..."
 
+FORWARD_POLICY=$([ "$ENABLE_IP_FORWARD" == "y" ] && echo "accept" || echo "drop")
+
 cat > /etc/nftables.conf << EOF
 #!/usr/sbin/nft -f
 #
@@ -410,7 +412,7 @@ fi)
     }
 
     chain forward {
-        type filter hook forward priority 10; policy drop;
+        type filter hook forward priority 10; policy $FORWARD_POLICY;
 
         # Let Docker/iptables-nft handle its own traffic first (priority 0)
         # Everything else is dropped
