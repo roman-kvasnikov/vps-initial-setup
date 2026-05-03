@@ -598,7 +598,7 @@ fi
 success "/dev/shm hardened (noexec,nosuid,nodev)"
 
 info "Restricting cron access..."
-echo "$NEW_USER" > /etc/cron.allow
+printf 'root\n%s\n' "$NEW_USER" > /etc/cron.allow
 chmod 600 /etc/cron.allow
 success "Only $NEW_USER and root can use cron"
 
