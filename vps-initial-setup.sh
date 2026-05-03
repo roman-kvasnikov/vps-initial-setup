@@ -613,15 +613,12 @@ cat > /etc/sudoers.d/99-hardening << 'EOF'
 # Timeout for password cache (minutes)
 Defaults timestamp_timeout=5
 
-# Require TTY (prevents sudo from scripts without terminal)
-Defaults requiretty
-
 # Show password prompt on failed attempts, not just silently fail
 Defaults passwd_tries=3
 EOF
 chmod 440 /etc/sudoers.d/99-hardening
 if visudo -c &>/dev/null; then
-    success "Sudo hardened (timeout=5min, requiretty, 3 attempts)"
+    success "Sudo hardened (timeout=5min, 3 attempts)"
 else
     error "Invalid sudoers config, removing..."
     rm -f /etc/sudoers.d/99-hardening
