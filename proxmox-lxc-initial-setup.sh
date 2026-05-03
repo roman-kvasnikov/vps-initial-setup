@@ -121,8 +121,8 @@ echo ""
 header "Review settings"
 echo -e "  Username:        ${GREEN}$NEW_USER${NC}"
 echo -e "  SSH port:        ${GREEN}$SSH_PORT${NC}"
-echo -e "  IP forwarding:   ${GREEN}$([ "$ENABLE_IP_FORWARD" == "y" ] && echo "enabled (VPN/Docker)" || echo "disabled")${NC}"
-echo -e "  SSH key:         ${GREEN}${SSH_PUB_KEY:+provided}${SSH_PUB_KEY:-not provided (add later)}${NC}"
+echo -e "  SSH key:         ${GREEN}$([ -n "$SSH_PUB_KEY" ] && echo "provided" || echo "not provided (add later)")${NC}"
+echo -e "  IP forwarding:   ${GREEN}$([ "$ENABLE_IP_FORWARD" == "y" ] && echo "enabled" || echo "disabled")${NC}"
 echo -e "  Auto-reboot:     ${GREEN}$([ "$AUTO_REBOOT" == "y" ] && echo "yes (at 4:00 AM, if no users)" || echo "no")${NC}"
 echo ""
 read -rp "Everything correct? Start setup? (y/n): " CONFIRM
@@ -152,10 +152,12 @@ PACKAGES=(
     unattended-upgrades # Automatic security updates
     curl               # HTTP client
     wget               # File downloader
+    git                # Git
     htop               # Resource monitor
     iotop              # I/O monitor
     net-tools          # Network utilities (ifconfig, netstat)
     sudo               # Just in case
+    logwatch           # Log summary reports
     needrestart        # Check if service restart is needed
     apt-listchanges    # Show changelog on upgrade
 )
@@ -165,9 +167,9 @@ apt install -y "${PACKAGES[@]}"
 success "Packages installed"
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 4: Create user
+# STEP 5: Create user
 # ═══════════════════════════════════════════════════════════════
-header "STEP 4: Creating user '$NEW_USER'"
+header "STEP 5: Creating user '$NEW_USER'"
 
 if ! id "$NEW_USER" &>/dev/null; then
     adduser --disabled-password --gecos "" "$NEW_USER"
@@ -185,20 +187,20 @@ while ! passwd "$NEW_USER"; do
 done
 success "Password set"
 
-info "Locking root account password..."
-passwd -l root
-success "Root account locked (login via su/ssh disabled, sudo still works)"
-
-# ═══════════════════════════════════════════════════════════════
-# STEP 5: SSH keys
-# ═══════════════════════════════════════════════════════════════
-header "STEP 5: SSH keys"
-
 USER_HOME=$(getent passwd "$NEW_USER" | cut -d: -f6)
 if [[ -z "$USER_HOME" || ! -d "$USER_HOME" ]]; then
     error "Could not resolve home directory for $NEW_USER"
     exit 1
 fi
+
+info "Locking root account password..."
+passwd -l root
+success "Root account locked (login via su/ssh disabled, sudo still works)"
+
+# ═══════════════════════════════════════════════════════════════
+# STEP 6: SSH keys
+# ═══════════════════════════════════════════════════════════════
+header "STEP 6: SSH keys"
 
 SSH_DIR="$USER_HOME/.ssh"
 AUTH_KEYS="$SSH_DIR/authorized_keys"
@@ -223,9 +225,9 @@ chmod 700 "$SSH_DIR"
 success ".ssh permissions set (700/600)"
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 6: SSH configuration
+# STEP 7: SSH configuration
 # ═══════════════════════════════════════════════════════════════
-header "STEP 6: SSH server configuration"
+header "STEP 7: SSH server configuration"
 
 SSHD_CONFIG="/etc/ssh/sshd_config"
 
@@ -289,9 +291,9 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 7: Firewall (nftables)
+# STEP 8: Firewall (nftables)
 # ═══════════════════════════════════════════════════════════════
-header "STEP 7: Firewall (nftables)"
+header "STEP 8: Firewall (nftables)"
 
 # Backup
 if [[ -f /etc/nftables.conf ]]; then
@@ -392,9 +394,9 @@ info "Current ruleset:"
 nft list ruleset
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 8: Fail2Ban
+# STEP 9: Fail2Ban
 # ═══════════════════════════════════════════════════════════════
-header "STEP 8: Fail2Ban"
+header "STEP 9: Fail2Ban"
 
 cat > /etc/fail2ban/jail.d/sshd.local << EOF
 [sshd]
@@ -429,9 +431,9 @@ info "SSH jail: 5 attempts in 10 min → 1 hour ban (increases on repeat)"
 info "Recidive jail: repeat offenders → 1 week ban"
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 9: Automatic security updates
+# STEP 10: Automatic security updates
 # ═══════════════════════════════════════════════════════════════
-header "STEP 9: Automatic updates"
+header "STEP 10: Automatic updates"
 
 AUTO_REBOOT_VALUE=$([ "$AUTO_REBOOT" == "y" ] && echo "true" || echo "false")
 cat > /etc/apt/apt.conf.d/50unattended-upgrades << UPGEOF
@@ -460,29 +462,27 @@ systemctl restart unattended-upgrades
 success "Automatic security updates configured"
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 10: Additional hardening
+# STEP 11: Additional hardening
 # ═══════════════════════════════════════════════════════════════
-header "STEP 10: Additional hardening"
+header "STEP 11: Additional hardening"
 
 info "Configuring IP forwarding..."
 cat > /etc/sysctl.d/99-ip-forwarding.conf << EOF
 # IP forwarding
 net.ipv4.ip_forward = $([ "$ENABLE_IP_FORWARD" == "y" ] && echo 1 || echo 0)
 EOF
-
 sysctl --system > /dev/null 2>&1
 success "IP forwarding configured"
 
 info "Restricting cron access..."
-echo "$NEW_USER" > /etc/cron.allow
+printf 'root\n%s\n' "$NEW_USER" > /etc/cron.allow
 chmod 600 /etc/cron.allow
 success "Only $NEW_USER and root can use cron"
 
 info "Restricting su command..."
-if grep -qE "^#\s*auth\s+required\s+pam_wheel\.so" /etc/pam.d/su; then
+if ! grep -q "pam_wheel.so" /etc/pam.d/su 2>/dev/null || grep -q "^#.*pam_wheel.so" /etc/pam.d/su 2>/dev/null; then
     sed -i 's/^#\s*\(auth\s*required\s*pam_wheel.so\).*/\1 group=sudo/' /etc/pam.d/su
-elif ! grep -q "pam_wheel.so" /etc/pam.d/su; then
-    echo "auth required pam_wheel.so group=sudo" >> /etc/pam.d/su
+    success "su restricted to sudo group"
 fi
 
 info "Hardening sudo configuration..."
@@ -502,9 +502,9 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 11: Restart SSH and verify
+# STEP 12: Restart SSH and verify
 # ═══════════════════════════════════════════════════════════════
-header "STEP 11: Applying SSH settings"
+header "STEP 12: Applying SSH settings"
 
 info "Verifying SSH configuration before restart..."
 if ! sshd -t 2>&1; then
@@ -546,6 +546,8 @@ else
     error "Failed to restart SSH! Check manually: systemctl status ssh"
 fi
 
+apt autoremove -y
+
 # ═══════════════════════════════════════════════════════════════
 # SUMMARY
 # ═══════════════════════════════════════════════════════════════
@@ -577,9 +579,9 @@ echo -e "  ├─ ✔ User ${GREEN}$NEW_USER${NC} created with sudo"
 echo -e "  ├─ ✔ SSH port: ${GREEN}$SSH_PORT${NC}, root disabled, password: ${GREEN}$PASSWORD_AUTH${NC}"
 echo -e "  ├─ ✔ SSH ciphers: curve25519/chacha20/ed25519 only"
 echo -e "  ├─ ✔ nftables Firewall (inet: IPv4 + IPv6) + SSH rate limiting"
+echo -e "  ├─ ✔ Forward chain: ${GREEN}$FORWARD_POLICY${NC}"
 echo -e "  ├─ ✔ Fail2Ban (nftables-multiport) + recidive jail"
 echo -e "  ├─ ✔ Automatic security updates"
-echo -e "  ├─ ✔ IP forwarding: ${GREEN}$([ "$ENABLE_IP_FORWARD" == "y" ] && echo "enabled" || echo "disabled")${NC}"
 echo -e "  └─ ✔ Cron and su restricted, config files protected"
 echo ""
 
