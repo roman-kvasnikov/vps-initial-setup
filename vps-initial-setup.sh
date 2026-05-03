@@ -102,13 +102,6 @@ if [[ -n "$SSH_PUB_KEY" ]]; then
     fi
 fi
 
-# --- Endlessh ---
-echo ""
-info "Endlessh — SSH tarpit (trap on port 22)."
-info "Bots connect to port 22 and get stuck for hours, wasting their resources."
-read -rp "Install Endlessh on port 22? (y/n, default y): " INSTALL_ENDLESSH
-INSTALL_ENDLESSH=${INSTALL_ENDLESSH:-y}
-
 # --- IP Forwarding ---
 echo ""
 info "IP forwarding is needed for VPN gateways (WireGuard, OpenVPN), Docker and NAT."
@@ -150,7 +143,6 @@ echo ""
 header "Review settings"
 echo -e "  Username:        ${GREEN}$NEW_USER${NC}"
 echo -e "  SSH port:        ${GREEN}$SSH_PORT${NC}"
-echo -e "  Endlessh:        ${GREEN}$([ "$INSTALL_ENDLESSH" == "y" ] && echo "yes (tarpit on port 22)" || echo "no")${NC}"
 echo -e "  IP forwarding:   ${GREEN}$([ "$ENABLE_IP_FORWARD" == "y" ] && echo "enabled (VPN/Docker)" || echo "disabled")${NC}"
 echo -e "  Docker host:     ${GREEN}$([ "$DOCKER_HOST" == "y" ] && echo "yes (forward chain: accept)" || echo "no (forward chain: drop)")${NC}"
 echo -e "  SSH key:         ${GREEN}${SSH_PUB_KEY:+provided}${SSH_PUB_KEY:-not provided (add later)}${NC}"
@@ -185,6 +177,7 @@ PACKAGES=(
     unattended-upgrades # Automatic security updates
     curl               # HTTP client
     wget               # File downloader
+    git                # Git
     htop               # Resource monitor
     iotop              # I/O monitor
     net-tools          # Network utilities (ifconfig, netstat)
@@ -415,11 +408,6 @@ table inet filter {
         tcp dport $SSH_PORT ct state new ip6 saddr != ::1 add @sshbrute6 { ip6 saddr limit rate over 4/minute } \\
             log prefix "nft-ssh-brute6: " level warn drop
         tcp dport $SSH_PORT accept
-
-$(if [[ "$INSTALL_ENDLESSH" == "y" ]]; then
-echo "        # Endlessh tarpit (port 22)"
-echo "        tcp dport 22 accept"
-fi)
 
         # === Additional ports (add here) ===
         # tcp dport 443 accept
@@ -654,89 +642,9 @@ for svc in "${DISABLE_SERVICES[@]}"; do
 done
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 12: Endlessh (SSH Tarpit)
+# STEP 12: Restart SSH and verify
 # ═══════════════════════════════════════════════════════════════
-if [[ "$INSTALL_ENDLESSH" == "y" ]]; then
-    header "STEP 12: Endlessh (SSH Tarpit)"
-
-    if apt-cache show endlessh &>/dev/null; then
-        apt install -y endlessh
-        success "Endlessh installed from repository"
-
-        ENDLESSH_BIN="/usr/bin/endlessh"
-        mkdir -p /etc/systemd/system/endlessh.service.d
-        cat > /etc/systemd/system/endlessh.service.d/override.conf << 'EOF'
-[Service]
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-PrivateUsers=false
-InaccessiblePaths=
-EOF
-        success "Systemd override created"
-    else
-        info "Endlessh not found in repositories, building from source..."
-        apt install -y build-essential git libc6-dev
-        (
-            cd /tmp
-            git clone --depth 1 https://github.com/skeeto/endlessh.git
-            cd endlessh
-            make
-            cp endlessh /usr/local/bin/
-            chmod 755 /usr/local/bin/endlessh
-        ) || { rm -rf /tmp/endlessh; error "Failed to build endlessh"; exit 1; }
-        rm -rf /tmp/endlessh
-        ENDLESSH_BIN="/usr/local/bin/endlessh"
-
-        cat > /etc/systemd/system/endlessh.service << 'EOF'
-[Unit]
-Description=Endlessh SSH Tarpit
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/endlessh -v -c /etc/endlessh/config
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-KillSignal=SIGTERM
-Restart=always
-RestartSec=30
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-EOF
-        success "Endlessh built and installed"
-    fi
-
-    mkdir -p /etc/endlessh
-    cat > /etc/endlessh/config << 'EOF'
-Port 22
-Delay 10000
-MaxClients 100
-MaxLineLength 32
-MaxStartTime 0
-BindFamily 0
-LogLevel 1
-EOF
-
-    setcap 'cap_net_bind_service=+ep' "$ENDLESSH_BIN"
-    success "CAP_NET_BIND_SERVICE set"
-
-    systemctl daemon-reload
-    systemctl enable endlessh
-    systemctl start endlessh
-
-    if systemctl is-active --quiet endlessh; then
-        success "Endlessh running on port 22 — bots will suffer 😈"
-    else
-        warn "Endlessh failed to start. Check: journalctl -u endlessh"
-    fi
-else
-    info "Endlessh skipped"
-fi
-
-# ═══════════════════════════════════════════════════════════════
-# STEP 13: Restart SSH and verify
-# ═══════════════════════════════════════════════════════════════
-header "STEP 13: Applying SSH settings"
+header "STEP 12: Applying SSH settings"
 
 info "Verifying SSH configuration before restart..."
 if ! sshd -t 2>&1; then
@@ -816,8 +724,7 @@ echo -e "  ├─ ✔ Fail2Ban (nftables-multiport) + recidive jail"
 echo -e "  ├─ ✔ Automatic security updates"
 echo -e "  ├─ ✔ Sysctl + kernel hardening (anti-spoofing, SYN flood, kptr, BPF, perf)"
 echo -e "  ├─ ✔ Core dumps disabled, /dev/shm hardened"
-echo -e "  ├─ ✔ Cron and su restricted, config files protected"
-echo -e "  └─ ✔ Endlessh: ${GREEN}$([ "$INSTALL_ENDLESSH" == "y" ] && echo "tarpit on port 22" || echo "skipped")${NC}"
+echo -e "  └─ ✔ Cron and su restricted, config files protected"
 echo ""
 
 echo -e "  ${BOLD}Firewall:${NC} /etc/nftables.conf"
