@@ -157,7 +157,6 @@ PACKAGES=(
     iotop              # I/O monitor
     net-tools          # Network utilities (ifconfig, netstat)
     sudo               # Just in case
-    logwatch           # Log summary reports
     needrestart        # Check if service restart is needed
     apt-listchanges    # Show changelog on upgrade
 )
