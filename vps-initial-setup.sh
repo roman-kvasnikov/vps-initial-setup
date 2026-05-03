@@ -673,7 +673,6 @@ Description=Endlessh SSH Tarpit
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/endlessh -v
 ExecStart=/usr/local/bin/endlessh -v -c /etc/endlessh/config
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 KillSignal=SIGTERM
