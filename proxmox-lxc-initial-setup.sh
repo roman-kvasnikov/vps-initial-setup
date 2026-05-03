@@ -138,6 +138,7 @@ export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 apt update -y
 apt full-upgrade -y
+apt autoremove -y
 success "System updated"
 
 # ═══════════════════════════════════════════════════════════════
@@ -549,8 +550,6 @@ if systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null; then
 else
     error "Failed to restart SSH! Check manually: systemctl status ssh"
 fi
-
-apt autoremove -y
 
 # ═══════════════════════════════════════════════════════════════
 # SUMMARY
