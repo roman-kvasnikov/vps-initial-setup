@@ -812,9 +812,7 @@ echo -e "  ${BOLD}Ports open in firewall (accessible from outside):${NC}"
 while IFS= read -r line; do
     port=$(echo "$line" | grep -oP 'dport \K[0-9]+')
     [[ -z "$port" ]] && continue
-    service=$(ss -tlnp "sport = :$port" 2>/dev/null | awk 'NR>1 {
-        match($0, /users:\(\("([^"]+)"/, a); if (a[1]) print a[1]
-    }' | head -1)
+    service=$(ss -tlnp "sport = :$port" 2>/dev/null | grep -oP 'users:\(\("\K[^"]+' | head -1)
     service=${service:-"(nothing listening)"}
     echo -e "  ${GREEN}✔${NC} port ${CYAN}$port${NC} — $service"
 done < <(nft -a list chain inet filter input 2>/dev/null | grep -E 'dport.*accept')
