@@ -480,9 +480,14 @@ chmod 600 /etc/cron.allow
 success "Only $NEW_USER and root can use cron"
 
 info "Restricting su command..."
-if ! grep -q "pam_wheel.so" /etc/pam.d/su 2>/dev/null || grep -q "^#.*pam_wheel.so" /etc/pam.d/su 2>/dev/null; then
+if grep -qE "^#\s*auth\s+required\s+pam_wheel\.so" /etc/pam.d/su; then
     sed -i 's/^#\s*\(auth\s*required\s*pam_wheel.so\).*/\1 group=sudo/' /etc/pam.d/su
-    success "su restricted to sudo group"
+    success "su restricted to sudo group (uncommented existing line)"
+elif ! grep -q "pam_wheel.so" /etc/pam.d/su; then
+    echo "auth required pam_wheel.so group=sudo" >> /etc/pam.d/su
+    success "su restricted to sudo group (line added)"
+else
+    info "pam_wheel.so already configured, skipping"
 fi
 
 info "Hardening sudo configuration..."
