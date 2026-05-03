@@ -120,8 +120,14 @@ ENABLE_IP_FORWARD=${ENABLE_IP_FORWARD:-n}
 echo ""
 info "If Docker will run on this server, the firewall forward chain"
 info "must allow Docker's traffic (it manages its own iptables rules)."
-read -rp "Will Docker run on this server? (y/n, default y): " DOCKER_HOST
-DOCKER_HOST=${DOCKER_HOST:-y}
+read -rp "Will Docker run on this server? (y/n, default n): " DOCKER_HOST
+DOCKER_HOST=${DOCKER_HOST:-n}
+
+# Docker requires IP forwarding; auto-enable if user forgot
+if [[ "$DOCKER_HOST" == "y" && "$ENABLE_IP_FORWARD" == "n" ]]; then
+    warn "Docker requires IP forwarding — auto-enabling it."
+    ENABLE_IP_FORWARD="y"
+fi
 
 # --- Auto-reboot ---
 echo ""
