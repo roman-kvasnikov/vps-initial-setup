@@ -116,6 +116,13 @@ info "If the server is just a host — better to disable."
 read -rp "Enable IP forwarding? (y/n, default n): " ENABLE_IP_FORWARD
 ENABLE_IP_FORWARD=${ENABLE_IP_FORWARD:-n}
 
+# --- Docker ---
+echo ""
+info "If Docker will run on this server, the firewall forward chain"
+info "must allow Docker's traffic (it manages its own iptables rules)."
+read -rp "Will Docker run on this server? (y/n, default y): " DOCKER_HOST
+DOCKER_HOST=${DOCKER_HOST:-y}
+
 # --- Auto-reboot ---
 echo ""
 info "Security updates may require a reboot."
@@ -139,6 +146,7 @@ echo -e "  Username:        ${GREEN}$NEW_USER${NC}"
 echo -e "  SSH port:        ${GREEN}$SSH_PORT${NC}"
 echo -e "  Endlessh:        ${GREEN}$([ "$INSTALL_ENDLESSH" == "y" ] && echo "yes (tarpit on port 22)" || echo "no")${NC}"
 echo -e "  IP forwarding:   ${GREEN}$([ "$ENABLE_IP_FORWARD" == "y" ] && echo "enabled (VPN/Docker)" || echo "disabled")${NC}"
+echo -e "  Docker host:     ${GREEN}$([ "$DOCKER_HOST" == "y" ] && echo "yes (forward chain: accept)" || echo "no (forward chain: drop)")${NC}"
 echo -e "  SSH key:         ${GREEN}${SSH_PUB_KEY:+provided}${SSH_PUB_KEY:-not provided (add later)}${NC}"
 echo -e "  Auto-reboot:     ${GREEN}$([ "$AUTO_REBOOT" == "y" ] && echo "yes (at 4:00 AM, if no users)" || echo "no")${NC}"
 echo -e "  Hostname:        ${GREEN}${NEW_HOSTNAME:-unchanged}${NC}"
@@ -346,7 +354,12 @@ fi
 
 info "Generating /etc/nftables.conf ..."
 
-FORWARD_POLICY=$([ "$ENABLE_IP_FORWARD" == "y" ] && echo "accept" || echo "drop")
+# Forward policy: accept if Docker or IP forwarding is needed, drop otherwise
+if [[ "$DOCKER_HOST" == "y" || "$ENABLE_IP_FORWARD" == "y" ]]; then
+    FORWARD_POLICY="accept"
+else
+    FORWARD_POLICY="drop"
+fi
 
 cat > /etc/nftables.conf << EOF
 #!/usr/sbin/nft -f
@@ -414,8 +427,8 @@ fi)
     chain forward {
         type filter hook forward priority 10; policy $FORWARD_POLICY;
 
-        # Let Docker/iptables-nft handle its own traffic first (priority 0)
-        # Everything else is dropped
+        # Forward policy is determined by Docker/IP-forwarding settings at install time.
+        # Established/related connections are always accepted.
         ct state established,related accept
     }
 
@@ -792,6 +805,7 @@ echo -e "  ├─ ✔ User ${GREEN}$NEW_USER${NC} created with sudo"
 echo -e "  ├─ ✔ SSH port: ${GREEN}$SSH_PORT${NC}, root disabled, password: ${GREEN}$PASSWORD_AUTH${NC}"
 echo -e "  ├─ ✔ SSH ciphers: curve25519/chacha20/ed25519 only"
 echo -e "  ├─ ✔ nftables Firewall (inet: IPv4 + IPv6) + SSH rate limiting"
+echo -e "  ├─ ✔ Forward chain: ${GREEN}$FORWARD_POLICY${NC} ($([ "$DOCKER_HOST" == "y" ] && echo "Docker mode" || ([ "$ENABLE_IP_FORWARD" == "y" ] && echo "VPN/NAT mode" || echo "host mode"))${NC})"
 echo -e "  ├─ ✔ Fail2Ban (nftables-multiport) + recidive jail"
 echo -e "  ├─ ✔ Automatic security updates"
 echo -e "  ├─ ✔ Sysctl + kernel hardening (anti-spoofing, SYN flood, kptr, BPF, perf)"
