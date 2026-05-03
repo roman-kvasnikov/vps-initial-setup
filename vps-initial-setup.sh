@@ -171,6 +171,7 @@ success "System updated"
 header "STEP 3: Installing packages"
 
 PACKAGES=(
+    openssh-server     # SSH server
     fail2ban           # Brute-force protection
     iptables
     nftables           # Firewall (iptables replacement)
