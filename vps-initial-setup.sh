@@ -674,6 +674,7 @@ After=network.target
 
 [Service]
 ExecStart=/usr/local/bin/endlessh -v
+ExecStart=/usr/local/bin/endlessh -v -c /etc/endlessh/config
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 KillSignal=SIGTERM
 Restart=always
@@ -758,6 +759,8 @@ if systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null; then
 else
     error "Failed to restart SSH! Check manually: systemctl status ssh"
 fi
+
+apt autoremove -y
 
 # ═══════════════════════════════════════════════════════════════
 # SUMMARY
