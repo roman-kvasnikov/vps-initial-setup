@@ -178,6 +178,8 @@ PACKAGES=(
     nftables           # Firewall (iptables replacement)
     unattended-upgrades # Automatic security updates
     curl               # HTTP client
+    nano               # Editor
+    cron               # Cron jobs
     wget               # File downloader
     git                # Git
     htop               # Resource monitor
