@@ -158,9 +158,11 @@ read -rp "Everything correct? Start setup? (y/n): " CONFIRM
 # ═══════════════════════════════════════════════════════════════
 header "STEP 2: System update"
 
-info "Updating package lists and installing upgrades..."
+# Non-interactive mode for all apt/needrestart operations in this script
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
+
+info "Updating package lists and installing upgrades..."
 apt update -y
 apt full-upgrade -y
 apt autoremove -y
@@ -172,23 +174,23 @@ success "System updated"
 header "STEP 3: Installing packages"
 
 PACKAGES=(
-    openssh-server     # SSH server
-    fail2ban           # Brute-force protection
-    iptables
-    nftables           # Firewall (iptables replacement)
+    openssh-server      # SSH server
+    fail2ban            # Brute-force protection
+    iptables            # Provides iptables-nft backend (Docker compatibility)
+    nftables            # Firewall
     unattended-upgrades # Automatic security updates
-    curl               # HTTP client
-    nano               # Editor
-    cron               # Cron jobs
-    wget               # File downloader
-    git                # Git
-    htop               # Resource monitor
-    iotop              # I/O monitor
-    net-tools          # Network utilities (ifconfig, netstat)
-    sudo               # Just in case
-    logwatch           # Log summary reports
-    needrestart        # Check if service restart is needed
-    apt-listchanges    # Show changelog on upgrade
+    curl                # HTTP client
+    nano                # Editor
+    cron                # Cron jobs
+    wget                # File downloader
+    git                 # Git
+    htop                # Resource monitor
+    iotop               # I/O monitor
+    net-tools           # Network utilities (ifconfig, netstat)
+    sudo                # Just in case
+    logwatch            # Log summary reports
+    needrestart         # Check if service restart is needed
+    apt-listchanges     # Show changelog on upgrade
 )
 
 info "Installing packages: ${PACKAGES[*]}"
@@ -202,8 +204,12 @@ header "STEP 4: Basic system settings"
 
 if [[ -n "$NEW_HOSTNAME" ]]; then
     hostnamectl set-hostname "$NEW_HOSTNAME"
-    if ! grep -qw "$NEW_HOSTNAME" /etc/hosts; then
-        sed -i "0,/^127\.0\.0\.1/s|^127\.0\.0\.1.*|127.0.0.1 localhost $NEW_HOSTNAME|" /etc/hosts
+    # Use the Debian/Ubuntu convention: a dedicated 127.0.1.1 line for the
+    # hostname, without touching the 127.0.0.1 localhost line.
+    if grep -qE '^127\.0\.1\.1' /etc/hosts; then
+        sed -i -E "s|^127\.0\.1\.1.*|127.0.1.1 $NEW_HOSTNAME|" /etc/hosts
+    elif ! grep -qw "$NEW_HOSTNAME" /etc/hosts; then
+        echo "127.0.1.1 $NEW_HOSTNAME" >> /etc/hosts
     fi
     success "Hostname set: $NEW_HOSTNAME"
 fi
@@ -226,7 +232,7 @@ fi
 usermod -aG sudo "$NEW_USER"
 success "User added to sudo group"
 
-info "Set password for user '$NEW_USER':"
+info "Set password for user '$NEW_USER' (needed for sudo):"
 while ! passwd "$NEW_USER"; do
     warn "Try again"
 done
@@ -240,7 +246,7 @@ fi
 
 info "Locking root account password..."
 passwd -l root
-success "Root account locked (login via su/ssh disabled, sudo still works)"
+success "Root account locked (password login via su/ssh disabled, sudo still works)"
 
 # ═══════════════════════════════════════════════════════════════
 # STEP 6: SSH keys
@@ -276,12 +282,23 @@ header "STEP 7: SSH server configuration"
 
 SSHD_CONFIG="/etc/ssh/sshd_config"
 
-if ! grep -q "^Include /etc/ssh/sshd_config.d/" "$SSHD_CONFIG" 2>/dev/null; then
-    warn "$SSHD_CONFIG is missing Include for sshd_config.d/."
-    warn "Adding Include directive to the beginning of the file..."
-    cp "$SSHD_CONFIG" "${SSHD_CONFIG}.backup.$(date +%Y%m%d-%H%M%S)"
+# Single backup before we touch anything in the main config
+cp "$SSHD_CONFIG" "${SSHD_CONFIG}.backup.$(date +%Y%m%d-%H%M%S)"
+info "Backup of $SSHD_CONFIG created"
+
+# Make sure drop-in configs are actually included
+if ! grep -qE "^\s*Include\s+/etc/ssh/sshd_config\.d/" "$SSHD_CONFIG" 2>/dev/null; then
+    warn "$SSHD_CONFIG is missing Include for sshd_config.d/. Adding it..."
     sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' "$SSHD_CONFIG"
-    success "Include added, backup of original created"
+    success "Include directive added"
+fi
+
+# IMPORTANT: the SSH 'Port' directive ACCUMULATES — it does not override.
+# Any active 'Port' in the main config would make sshd ALSO listen there
+# (e.g. keeping port 22 open). Comment out active Port lines in the main config.
+if grep -qE "^\s*Port\s+" "$SSHD_CONFIG"; then
+    sed -i -E 's/^(\s*Port\s+)/#\1/' "$SSHD_CONFIG"
+    warn "Commented out active 'Port' directive(s) in $SSHD_CONFIG (avoids extra open ports)"
 fi
 
 if [[ -n "$SSH_PUB_KEY" ]]; then
@@ -289,7 +306,7 @@ if [[ -n "$SSH_PUB_KEY" ]]; then
 else
     PASSWORD_AUTH="yes"
     warn "Password authentication is ENABLED because no SSH key was provided."
-    warn "After adding a key, disable password in /etc/ssh/sshd_config.d/00-hardening.conf"
+    warn "After adding a key, disable it in /etc/ssh/sshd_config.d/00-hardening.conf"
 fi
 
 cat > /etc/ssh/sshd_config.d/00-hardening.conf << EOF
@@ -337,7 +354,14 @@ fi
 # ═══════════════════════════════════════════════════════════════
 header "STEP 8: Firewall (nftables)"
 
-# Switch iptables to nftables backend (needed for Docker compatibility)
+# Disable ufw if present — it would conflict with our nftables ruleset
+if systemctl list-unit-files 2>/dev/null | grep -q '^ufw\.service'; then
+    systemctl stop ufw 2>/dev/null || true
+    systemctl disable ufw 2>/dev/null || true
+    success "ufw disabled (using nftables directly)"
+fi
+
+# Switch iptables to the nft backend (needed for Docker compatibility)
 if command -v update-alternatives &>/dev/null; then
     update-alternatives --set iptables /usr/sbin/iptables-nft 2>/dev/null || true
     update-alternatives --set ip6tables /usr/sbin/ip6tables-nft 2>/dev/null || true
@@ -364,7 +388,11 @@ fi
 cat > /etc/nftables.conf << EOF
 #!/usr/sbin/nft -f
 
-flush ruleset
+# Reset ONLY our own table. This keeps Docker (ip family) and Fail2Ban
+# (inet f2b-table) rules intact across reloads of this file, unlike
+# 'flush ruleset' which would wipe everything.
+table inet filter
+delete table inet filter
 
 table inet filter {
     # SSH rate limiting: remembers IPs, auto-cleanup after 300 seconds
@@ -535,10 +563,16 @@ success "Automatic security updates configured"
 header "STEP 11: Additional hardening"
 
 info "Configuring kernel parameters (sysctl hardening)..."
+
+# Reverse path filtering (anti-spoofing). Strict mode (1) can drop legitimate
+# packets in asymmetric-routing scenarios common with VPN gateways, so use
+# loose mode (2) when forwarding is enabled, strict (1) otherwise.
+RP_FILTER=$([ "$ENABLE_IP_FORWARD" == "y" ] && echo 2 || echo 1)
+
 cat > /etc/sysctl.d/99-security-hardening.conf << EOF
-# IP spoofing protection
-net.ipv4.conf.all.rp_filter = 1
-net.ipv4.conf.default.rp_filter = 1
+# IP spoofing protection (reverse path filter)
+net.ipv4.conf.all.rp_filter = $RP_FILTER
+net.ipv4.conf.default.rp_filter = $RP_FILTER
 
 # Ignore ICMP redirects (MITM protection)
 net.ipv4.conf.all.accept_redirects = 0
@@ -557,6 +591,9 @@ net.ipv4.tcp_syncookies = 1
 net.ipv4.tcp_max_syn_backlog = 2048
 net.ipv4.tcp_synack_retries = 2
 net.ipv4.tcp_syn_retries = 5
+
+# Protect against TIME-WAIT assassination
+net.ipv4.tcp_rfc1337 = 1
 
 # Ignore ICMP broadcast
 net.ipv4.icmp_echo_ignore_broadcasts = 1
@@ -595,7 +632,7 @@ fs.protected_regular = 2
 EOF
 
 sysctl --system > /dev/null 2>&1
-success "Kernel parameters hardened"
+success "Kernel parameters hardened (rp_filter=$RP_FILTER)"
 
 info "Disabling core dumps..."
 if ! grep -q "hard core 0" /etc/security/limits.conf 2>/dev/null; then
@@ -632,10 +669,10 @@ fi
 
 info "Hardening sudo configuration..."
 cat > /etc/sudoers.d/99-hardening << 'EOF'
-# Timeout for password cache (minutes)
+# Password cache timeout (minutes)
 Defaults timestamp_timeout=5
 
-# Show password prompt on failed attempts, not just silently fail
+# Allow 3 password attempts before failing
 Defaults passwd_tries=3
 EOF
 chmod 440 /etc/sudoers.d/99-hardening
@@ -685,7 +722,7 @@ if systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null; then
     else
         error "SSH is NOT listening on port $SSH_PORT!"
         warn "Checking which port sshd is listening on:"
-        ss -tlnp | grep sshd || ss -tlnp | grep ssh
+        ss -tlnp | grep -E 'sshd?' || true
     fi
 
     # Check: nftables allows the SSH port
@@ -749,12 +786,12 @@ echo ""
 # --- Ports open through firewall ---
 echo -e "  ${BOLD}Ports open in firewall (accessible from outside):${NC}"
 while IFS= read -r line; do
-    port=$(echo "$line" | grep -oP 'dport \K[0-9]+')
+    port=$(echo "$line" | grep -oP 'dport \K[0-9]+' || true)
     [[ -z "$port" ]] && continue
-    service=$(ss -tlnp "sport = :$port" 2>/dev/null | grep -oP 'users:\(\("\K[^"]+' | head -1)
+    service=$(ss -tlnp "sport = :$port" 2>/dev/null | grep -oP 'users:\(\("\K[^"]+' | head -1 || true)
     service=${service:-"(nothing listening)"}
     echo -e "  ${GREEN}✔${NC} port ${CYAN}$port${NC} — $service"
-done < <(nft -a list chain inet filter input 2>/dev/null | grep -E 'dport.*accept')
+done < <(nft -a list chain inet filter input 2>/dev/null | grep -E 'dport.*accept' || true)
 echo ""
 
 echo -e "  ${BOLD}Log:${NC} $LOG_FILE"
