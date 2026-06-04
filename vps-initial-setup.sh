@@ -293,9 +293,6 @@ else
 fi
 
 cat > /etc/ssh/sshd_config.d/00-hardening.conf << EOF
-# ═══ VPS Hardening Config ═══
-# Generated: $(date)
-
 Port $SSH_PORT
 LoginGraceTime 1m
 PermitRootLogin no
@@ -366,15 +363,10 @@ fi
 
 cat > /etc/nftables.conf << EOF
 #!/usr/sbin/nft -f
-#
-# VPS Hardening — nftables firewall
-# Generated: $(date)
-#
 
 flush ruleset
 
 table inet filter {
-
     # SSH rate limiting: remembers IPs, auto-cleanup after 300 seconds
     set sshbrute4 {
         type ipv4_addr
@@ -389,22 +381,36 @@ table inet filter {
     }
 
     chain input {
-        type filter hook input priority 0; policy drop;
+        type filter hook input priority filter; policy drop;
 
         # Loopback
-        iif "lo" accept
+        iifname "lo" accept
 
-        # Drop invalid packets
+        # Conntrack
+        ct state established,related accept
         ct state invalid drop
 
-        # Established/Related
-        ct state established,related accept
+        # ICMPv4 - for ping and path MTU discovery
+        ip protocol icmp icmp type {
+            destination-unreachable,
+            time-exceeded,
+            parameter-problem,
+            echo-request
+        } accept
 
-        # ICMP (ping)
-        ip protocol icmp icmp type echo-request accept
-
-        # ICMPv6 (Neighbor Discovery, Path MTU, etc.)
-        ip6 nexthdr ipv6-icmp accept
+        # ICMPv6 - for NDP
+        ip6 nexthdr icmpv6 icmpv6 type {
+            destination-unreachable,
+            packet-too-big,
+            time-exceeded,
+            parameter-problem,
+            echo-request,
+            echo-reply,
+            nd-router-advert,
+            nd-router-solicit,
+            nd-neighbor-advert,
+            nd-neighbor-solicit
+        } accept
 
         # SSH (port $SSH_PORT) with rate limiting — max 4 new connections/min per IP
         tcp dport $SSH_PORT ct state new ip saddr != 127.0.0.0/8 add @sshbrute4 { ip saddr limit rate over 4/minute } \\
@@ -431,7 +437,7 @@ table inet filter {
     }
 
     chain output {
-        type filter hook output priority 0; policy accept;
+        type filter hook output priority filter; policy accept;
     }
 }
 EOF
