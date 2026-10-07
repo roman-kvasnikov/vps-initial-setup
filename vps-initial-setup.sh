@@ -631,6 +631,17 @@ fs.protected_fifos = 2
 fs.protected_regular = 2
 EOF
 
+info "Enabling TCP BBR congestion control..."
+
+modprobe tcp_bbr 2>/dev/null || true
+if grep -qw bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
+    echo "tcp_bbr" > /etc/modules-load.d/bbr.conf
+    echo "net.ipv4.tcp_congestion_control = bbr" > /etc/sysctl.d/90-bbr.conf
+    success "TCP BBR enabled"
+else
+    warn "TCP BBR is not available in this kernel, keeping default congestion control"
+fi
+
 sysctl --system > /dev/null 2>&1
 success "Kernel parameters hardened (rp_filter=$RP_FILTER)"
 
