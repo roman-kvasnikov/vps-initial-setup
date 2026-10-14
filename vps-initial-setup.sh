@@ -138,6 +138,15 @@ echo ""
 read -rp "Timezone (e.g. Europe/London, empty = UTC): " TIMEZONE
 TIMEZONE=${TIMEZONE:-UTC}
 
+# --- Forward chain mode (for display) ---
+if [[ "$DOCKER_HOST" == "y" ]]; then
+    FORWARD_MODE="Docker mode"
+elif [[ "$ENABLE_IP_FORWARD" == "y" ]]; then
+    FORWARD_MODE="VPN/NAT mode"
+else
+    FORWARD_MODE="host mode"
+fi
+
 # --- Confirmation ---
 echo ""
 header "Review settings"
@@ -145,7 +154,8 @@ echo -e "  Username:        ${GREEN}$NEW_USER${NC}"
 echo -e "  SSH port:        ${GREEN}$SSH_PORT${NC}"
 echo -e "  SSH key:         ${GREEN}$([ -n "$SSH_PUB_KEY" ] && echo "provided" || echo "not provided (add later)")${NC}"
 echo -e "  IP forwarding:   ${GREEN}$([ "$ENABLE_IP_FORWARD" == "y" ] && echo "enabled (VPN/Docker)" || echo "disabled")${NC}"
-echo -e "  Docker host:     ${GREEN}$([ "$DOCKER_HOST" == "y" ] && echo "yes (forward chain: accept)" || echo "no (forward chain: drop)")${NC}"
+echo -e "  Docker host:     ${GREEN}$([ "$DOCKER_HOST" == "y" ] && echo "yes (forward chain: drop + Docker rules)" || echo "no")${NC}"
+echo -e "  Forward chain:   ${GREEN}drop ($FORWARD_MODE)${NC}"
 echo -e "  Auto-reboot:     ${GREEN}$([ "$AUTO_REBOOT" == "y" ] && echo "yes (at 4:00 AM, if no users)" || echo "no")${NC}"
 echo -e "  Hostname:        ${GREEN}${NEW_HOSTNAME:-unchanged}${NC}"
 echo -e "  Timezone:        ${GREEN}$TIMEZONE${NC}"
@@ -350,7 +360,9 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 8: Firewall (nftables)
+# STEP 8: Firewall (nftables) — generate and validate only.
+# Rules are loaded in STEP 12, AFTER sshd is confirmed listening on the
+# new port. Loading earlier would close port 22 while sshd still uses it.
 # ═══════════════════════════════════════════════════════════════
 header "STEP 8: Firewall (nftables)"
 
@@ -392,15 +404,14 @@ if [[ "$DOCKER_HOST" == "y" ]]; then
 "
 fi
 
+# Docker auto-enables forwarding, so this covers both Docker and VPN hosts
 if [[ "$ENABLE_IP_FORWARD" == "y" ]]; then
     FORWARD_RULES+="
         # === Routed interfaces / tunnels (add here) ===
         # iifname \"awg0\" accept
         # iifname \"wg0\" accept
 "
-fi
-
-if [[ "$DOCKER_HOST" != "y" && "$ENABLE_IP_FORWARD" != "y" ]]; then
+else
     FORWARD_RULES+="
         # Host does not route traffic: everything else is dropped
 "
@@ -491,7 +502,7 @@ EOF
 
 success "/etc/nftables.conf created"
 
-# Validate before applying
+# Validate syntax without applying
 if nft -c -f /etc/nftables.conf; then
     success "nftables configuration is valid"
 else
@@ -499,14 +510,20 @@ else
     exit 1
 fi
 
-nft -f /etc/nftables.conf
-success "nftables rules loaded"
+# Stock nftables.service runs 'nft flush ruleset' on stop/restart, which
+# would wipe Docker and Fail2Ban tables too. Remove only our own table.
+mkdir -p /etc/systemd/system/nftables.service.d
+cat > /etc/systemd/system/nftables.service.d/override.conf << 'EOF'
+[Service]
+ExecStop=
+ExecStop=/usr/sbin/nft delete table inet filter
+EOF
+systemctl daemon-reload
+success "nftables.service override: stop/restart removes only 'inet filter'"
 
 systemctl enable nftables
 success "nftables enabled (rules load on boot)"
-
-info "Current ruleset:"
-nft list ruleset
+info "Rules will be loaded in STEP 12 after SSH is verified on port $SSH_PORT"
 
 # ═══════════════════════════════════════════════════════════════
 # STEP 9: Fail2Ban
@@ -724,14 +741,15 @@ for svc in "${DISABLE_SERVICES[@]}"; do
 done
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 12: Restart SSH and verify
+# STEP 12: Restart SSH, verify, then load firewall
 # ═══════════════════════════════════════════════════════════════
-header "STEP 12: Applying SSH settings"
+header "STEP 12: Applying SSH settings and firewall"
 
 info "Verifying SSH configuration before restart..."
 if ! sshd -t 2>&1; then
     error "SSH configuration is invalid! Aborting restart."
     error "Fix the config and restart manually: systemctl restart ssh"
+    error "Firewall rules were NOT loaded (to avoid lockout)."
     exit 1
 fi
 success "SSH configuration is valid"
@@ -741,6 +759,7 @@ warn "Your current session will remain active."
 warn "Make sure to test the connection in a NEW terminal before closing this session!"
 echo ""
 
+SSH_OK="n"
 if systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null; then
     success "SSH server restarted"
 
@@ -749,11 +768,22 @@ if systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null; then
     # Check: is sshd listening on the new port
     if ss -tlnp | grep -q ":${SSH_PORT}\b"; then
         success "SSH is listening on port $SSH_PORT ✔"
+        SSH_OK="y"
     else
         error "SSH is NOT listening on port $SSH_PORT!"
         warn "Checking which port sshd is listening on:"
         ss -tlnp | grep -E 'sshd?' || true
     fi
+else
+    error "Failed to restart SSH! Check manually: systemctl status ssh"
+fi
+
+FIREWALL_LOADED="n"
+if [[ "$SSH_OK" == "y" ]]; then
+    info "Loading nftables rules..."
+    nft -f /etc/nftables.conf
+    FIREWALL_LOADED="y"
+    success "nftables rules loaded"
 
     # Check: nftables allows the SSH port
     if nft list chain inet filter input 2>/dev/null | grep -q "dport $SSH_PORT"; then
@@ -764,8 +794,13 @@ if systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null; then
         nft add rule inet filter input tcp dport "$SSH_PORT" accept
         warn "Port $SSH_PORT opened directly. Check /etc/nftables.conf"
     fi
+
+    info "Current ruleset:"
+    nft list ruleset
 else
-    error "Failed to restart SSH! Check manually: systemctl status ssh"
+    error "Firewall rules were NOT loaded because SSH is not confirmed on port $SSH_PORT."
+    warn "Fix SSH first, then apply manually: nft -f /etc/nftables.conf"
+    warn "(rules will also load automatically on next boot)"
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -798,8 +833,12 @@ echo -e "  ├─ ✔ System updated"
 echo -e "  ├─ ✔ User ${GREEN}$NEW_USER${NC} created with sudo"
 echo -e "  ├─ ✔ SSH port: ${GREEN}$SSH_PORT${NC}, root disabled, password: ${GREEN}$PASSWORD_AUTH${NC}"
 echo -e "  ├─ ✔ SSH ciphers: curve25519/chacha20/ed25519 only"
-echo -e "  ├─ ✔ nftables Firewall (inet: IPv4 + IPv6) + SSH rate limiting"
-echo -e "  ├─ ✔ Forward chain: ${GREEN}$FORWARD_POLICY${NC} ($([ "$DOCKER_HOST" == "y" ] && echo "Docker mode" || ([ "$ENABLE_IP_FORWARD" == "y" ] && echo "VPN/NAT mode" || echo "host mode")))"
+if [[ "$FIREWALL_LOADED" == "y" ]]; then
+    echo -e "  ├─ ✔ nftables Firewall (inet: IPv4 + IPv6) + SSH rate limiting"
+else
+    echo -e "  ├─ ${RED}✘ nftables Firewall NOT loaded (see errors above)${NC}"
+fi
+echo -e "  ├─ ✔ Forward chain: ${GREEN}drop${NC} ($FORWARD_MODE)"
 echo -e "  ├─ ✔ Fail2Ban (nftables-multiport) + recidive jail"
 echo -e "  ├─ ✔ Automatic security updates"
 echo -e "  ├─ ✔ Sysctl + kernel hardening (anti-spoofing, SYN flood, kptr, BPF, perf)"
@@ -814,15 +853,22 @@ echo -e "  Then apply: ${CYAN}sudo nft -f /etc/nftables.conf${NC}"
 echo ""
 
 # --- Ports open through firewall ---
-echo -e "  ${BOLD}Ports open in firewall (accessible from outside):${NC}"
-while IFS= read -r line; do
-    port=$(echo "$line" | grep -oP 'dport \K[0-9]+' || true)
-    [[ -z "$port" ]] && continue
-    service=$(ss -tlnp "sport = :$port" 2>/dev/null | grep -oP 'users:\(\("\K[^"]+' | head -1 || true)
-    service=${service:-"(nothing listening)"}
-    echo -e "  ${GREEN}✔${NC} port ${CYAN}$port${NC} — $service"
-done < <(nft -a list chain inet filter input 2>/dev/null | grep -E 'dport.*accept' || true)
-echo ""
+if [[ "$FIREWALL_LOADED" == "y" ]]; then
+    echo -e "  ${BOLD}Ports open in firewall (accessible from outside):${NC}"
+    while IFS= read -r line; do
+        proto=$(echo "$line" | grep -oP '^\s*\K(tcp|udp)' || true)
+        for port in $(echo "$line" | grep -oP 'dport \{?\s*\K[0-9, ]+' | tr ',' ' '); do
+            if [[ "$proto" == "udp" ]]; then
+                service=$(ss -ulnpH "sport = :$port" 2>/dev/null | grep -oP 'users:\(\("\K[^"]+' | head -1 || true)
+            else
+                service=$(ss -tlnpH "sport = :$port" 2>/dev/null | grep -oP 'users:\(\("\K[^"]+' | head -1 || true)
+            fi
+            service=${service:-"(nothing listening)"}
+            echo -e "  ${GREEN}✔${NC} ${proto:-tcp}/${CYAN}$port${NC} — $service"
+        done
+    done < <(nft list chain inet filter input 2>/dev/null | grep -E 'dport.*accept' || true)
+    echo ""
+fi
 
 echo -e "  ${BOLD}Log:${NC} $LOG_FILE"
 echo ""
