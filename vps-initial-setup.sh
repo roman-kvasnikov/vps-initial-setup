@@ -378,34 +378,57 @@ fi
 
 info "Generating /etc/nftables.conf ..."
 
-# Forward policy: accept if Docker or IP forwarding is needed, drop otherwise
-if [[ "$DOCKER_HOST" == "y" || "$ENABLE_IP_FORWARD" == "y" ]]; then
-    FORWARD_POLICY="accept"
-else
-    FORWARD_POLICY="drop"
+# Forward chain is always default-deny; allowed traffic is added explicitly
+FORWARD_RULES=""
+
+if [[ "$DOCKER_HOST" == "y" ]]; then
+    FORWARD_RULES+="
+        # Docker published ports (DNAT done by Docker in prerouting)
+        ct status dnat accept
+
+        # Traffic originating from Docker networks (egress, inter-container)
+        iifname \"docker0\" accept
+        iifname \"br-*\" accept
+"
+fi
+
+if [[ "$ENABLE_IP_FORWARD" == "y" ]]; then
+    FORWARD_RULES+="
+        # === Routed interfaces / tunnels (add here) ===
+        # iifname \"awg0\" accept
+        # iifname \"wg0\" accept
+"
+fi
+
+if [[ "$DOCKER_HOST" != "y" && "$ENABLE_IP_FORWARD" != "y" ]]; then
+    FORWARD_RULES+="
+        # Host does not route traffic: everything else is dropped
+"
 fi
 
 cat > /etc/nftables.conf << EOF
 #!/usr/sbin/nft -f
 
-# Reset ONLY our own table. This keeps Docker (ip family) and Fail2Ban
-# (inet f2b-table) rules intact across reloads of this file, unlike
-# 'flush ruleset' which would wipe everything.
+# Baseline hardening for an internet-facing VPS.
+# Resets ONLY its own table: Docker (ip/ip6 tables) and Fail2Ban
+# (inet f2b-table) rules survive reloads of this file.
+
 table inet filter
 delete table inet filter
 
 table inet filter {
-    # SSH rate limiting: remembers IPs, auto-cleanup after 300 seconds
+
+    # SSH rate limiting state, per source IP
     set sshbrute4 {
         type ipv4_addr
         flags dynamic, timeout
-        timeout 300s
+        timeout 5m
     }
 
     set sshbrute6 {
         type ipv6_addr
         flags dynamic, timeout
-        timeout 300s
+        timeout 5m
     }
 
     chain input {
@@ -414,55 +437,51 @@ table inet filter {
         # Loopback
         iifname "lo" accept
 
-        # Conntrack
+        # Connection tracking
         ct state established,related accept
         ct state invalid drop
 
-        # ICMPv4 - for ping and path MTU discovery
-        ip protocol icmp icmp type {
-            destination-unreachable,
-            time-exceeded,
-            parameter-problem,
-            echo-request
-        } accept
+        # New TCP connections must start with a pure SYN
+        tcp flags & (fin|syn|rst|ack) != syn ct state new drop
 
-        # ICMPv6 - for NDP
-        ip6 nexthdr icmpv6 icmpv6 type {
-            destination-unreachable,
-            packet-too-big,
-            time-exceeded,
-            parameter-problem,
-            echo-request,
-            echo-reply,
-            nd-router-advert,
-            nd-router-solicit,
-            nd-neighbor-advert,
-            nd-neighbor-solicit
-        } accept
+        # ICMPv4: errors + PMTU, rate-limited ping
+        icmp type { destination-unreachable, time-exceeded, parameter-problem } accept
+        icmp type echo-request limit rate 10/second accept
 
-        # SSH (port $SSH_PORT) with rate limiting — max 4 new connections/min per IP
-        tcp dport $SSH_PORT ct state new ip saddr != 127.0.0.0/8 add @sshbrute4 { ip saddr limit rate over 4/minute } \\
-            log prefix "nft-ssh-brute: " level warn drop
-        tcp dport $SSH_PORT ct state new ip6 saddr != ::1 add @sshbrute6 { ip6 saddr limit rate over 4/minute } \\
-            log prefix "nft-ssh-brute6: " level warn drop
-        tcp dport $SSH_PORT accept
+        # ICMPv6: errors + PMTU, rate-limited ping
+        icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept
+        icmpv6 type echo-request limit rate 10/second accept
 
-        # === Additional ports (add here) ===
-        # tcp dport 443 accept
-        # tcp dport 80 accept
+        # ICMPv6: NDP (hop limit 255 per RFC 4861)
+        icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert } ip6 hoplimit 255 accept
+
+        # ICMPv6: MLD queries from link-local
+        ip6 saddr fe80::/10 icmpv6 type { mld-listener-query } accept
+
+        # DHCPv6 client (uncomment only if IPv6 is obtained via DHCPv6)
+        # ip6 saddr fe80::/10 udp dport 546 accept
+
+        # SSH: max 4 new connections/min per source IP, excess dropped
+        tcp dport ${SSH_PORT} ct state new update @sshbrute4 { ip saddr limit rate over 4/minute } counter drop
+        tcp dport ${SSH_PORT} ct state new update @sshbrute6 { ip6 saddr limit rate over 4/minute } counter drop
+        tcp dport ${SSH_PORT} accept
+
+        # === Host services (add here) ===
+        # NOTE: ports published by Docker do NOT pass this chain
+        # tcp dport { 80, 443 } accept
         # udp dport 51820 accept
 
-        # Log dropped packets
-        limit rate 5/minute log prefix "nft-dropped: " level warn
+        # Log what gets dropped by policy (rate-limited)
+        limit rate 5/minute burst 5 packets log prefix "nft-input-drop: " level warn
     }
 
     chain forward {
-        type filter hook forward priority 10; policy $FORWARD_POLICY;
+        type filter hook forward priority filter + 10; policy drop;
 
-        # Forward policy is determined by Docker/IP-forwarding settings at install time.
-        # Established/related connections are always accepted.
+        # Connection tracking
         ct state established,related accept
-    }
+        ct state invalid drop
+${FORWARD_RULES}    }
 
     chain output {
         type filter hook output priority filter; policy accept;
