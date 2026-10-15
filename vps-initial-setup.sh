@@ -429,19 +429,6 @@ delete table inet filter
 
 table inet filter {
 
-    # SSH rate limiting state, per source IP
-    set sshbrute4 {
-        type ipv4_addr
-        flags dynamic, timeout
-        timeout 5m
-    }
-
-    set sshbrute6 {
-        type ipv6_addr
-        flags dynamic, timeout
-        timeout 5m
-    }
-
     chain input {
         type filter hook input priority filter; policy drop;
 
@@ -452,38 +439,26 @@ table inet filter {
         ct state established,related accept
         ct state invalid drop
 
-        # New TCP connections must start with a pure SYN
-        tcp flags & (fin|syn|rst|ack) != syn ct state new drop
-
-        # ICMPv4: errors + PMTU, rate-limited ping
-        icmp type { destination-unreachable, time-exceeded, parameter-problem } accept
+        # ICMP: ping, IPv6 neighbor discovery, PMTU errors
         icmp type echo-request limit rate 10/second accept
+        icmpv6 type {
+            destination-unreachable,
+            packet-too-big,
+            time-exceeded,
+            parameter-problem,
+            nd-router-advert,
+            nd-neighbor-solicit,
+            nd-neighbor-advert,
+            echo-request
+        } accept
 
-        # ICMPv6: errors + PMTU, rate-limited ping
-        icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept
-        icmpv6 type echo-request limit rate 10/second accept
-
-        # ICMPv6: NDP (hop limit 255 per RFC 4861)
-        icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert } ip6 hoplimit 255 accept
-
-        # ICMPv6: MLD queries from link-local
-        ip6 saddr fe80::/10 icmpv6 type { mld-listener-query } accept
-
-        # DHCPv6 client (uncomment only if IPv6 is obtained via DHCPv6)
-        # ip6 saddr fe80::/10 udp dport 546 accept
-
-        # SSH: max 4 new connections/min per source IP, excess dropped
-        tcp dport ${SSH_PORT} ct state new update @sshbrute4 { ip saddr limit rate over 4/minute } counter drop
-        tcp dport ${SSH_PORT} ct state new update @sshbrute6 { ip6 saddr limit rate over 4/minute } counter drop
+        # SSH
         tcp dport ${SSH_PORT} accept
 
         # === Host services (add here) ===
         # NOTE: ports published by Docker do NOT pass this chain
         # tcp dport { 80, 443 } accept
         # udp dport 51820 accept
-
-        # Log what gets dropped by policy (rate-limited)
-        limit rate 5/minute burst 5 packets log prefix "nft-input-drop: " level warn
     }
 
     chain forward {
@@ -492,7 +467,11 @@ table inet filter {
         # Connection tracking
         ct state established,related accept
         ct state invalid drop
-${FORWARD_RULES}    }
+${FORWARD_RULES}
+
+        # === Routed interfaces / tunnels (add here) ===
+        # iifname "wg0" accept
+    }
 
     chain output {
         type filter hook output priority filter; policy accept;
